@@ -1,0 +1,94 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+      inputs:
+        beta:
+            type: boolean
+            default: false
+            description: Deploy to Beta
+        origin:
+            type: boolean
+            default: false
+            description: Deploy to Origin
+        alpha:
+            type: boolean
+            default: false
+            description: Deploy to Alpha
+        production:
+            type: boolean
+            default: false
+            description: Deploy to Production
+        environment:
+            description: 'Environment to run deploy'
+            type: environment
+            default: production
+
+jobs:
+
+  set-analytics:
+    runs-on: ubuntu
+    outputs:
+        analytics: ${{ steps.step1.outputs.analytics }}
+    steps:
+      - id: step1
+        run: |
+          echo "{
+            \"beta\": ${{ toJson(github.event.inputs.beta) }},
+            \"origin\": ${{ toJson(github.event.inputs.origin) }},
+            \"alpha\": ${{ toJson(github.event.inputs.alpha) }},
+            \"production\": ${{ toJson(github.event.inputs.production) }}
+          }" > output.json
+          echo "analytics=$( jq -c 'map_values(. // empty) | keys' output.json)" >> $GITHUB_OUTPUT
+
+  check-build:
+    runs-on: ubuntu
+    steps:
+        - name: Echo
+          run: |
+            echo ${{ toJson(github.event.inputs.production) }}
+            echo ${{ toJson(github) }}
+
+
+  build:
+    runs-on: ubuntu
+    if: failure()
+    needs: check-build
+    name: build-${{ matrix.app-env }}
+    strategy:
+      matrix:
+        app-env: ['staging', 'production']
+    steps:
+        - name: TEst
+          run: echo "Build RUN ${{ matrix.app-env }}"
+
+
+  deployment:
+    runs-on: ubuntu
+    name: deploy-${{ matrix.analytics }}
+    if: ${{ needs.build.result == 'skipped' || needs.build.result == 'success' || needs.build.result == null }}
+    needs: [ set-analytics, build ]
+    strategy:
+        matrix:
+           analytics: ${{ fromJSON(needs.set-analytics.outputs.analytics) }}
+    steps:
+        - name: Echo
+          run: echo "${{ matrix.analytics }}"
+
+
+  deploy-stable-release-2:
+    runs-on: ubuntu
+    name: ${{ matrix.host }}-deploy
+    needs: deployment
+    strategy:
+        matrix:
+          host: [ release-2, stable ]
+          isStable:
+            - ${{ contains(inputs.origin, 'false') }}
+          exclude:
+            - isStable: false
+              host: "stable"
+    steps:
+        - name: Run Deploy
+          run: |
+            echo '${{ matrix.host }}'
